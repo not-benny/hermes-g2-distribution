@@ -73,6 +73,10 @@ def validate_responses(responses: list[dict[str, Any]]) -> None:
         "blocked",
         "no assignee",
         "never starts a worker",
+        "current wearer request explicitly names",
+        "fresh turn",
+        "never choose a listed board yourself",
+        "local work tasks",
     )
     if not all(phrase in description for phrase in required_phrases):
         raise RuntimeError(
@@ -84,6 +88,20 @@ def validate_responses(responses: list[dict[str, Any]]) -> None:
     properties = schema.get("properties") or {}
     if set(properties) != {"title", "board", "body"}:
         raise RuntimeError("Kanban workflow input surface changed")
+
+    work_tasks = next(
+        tool for tool in raw_tools if tool.get("name") == "g2_work_task_add"
+    )
+    work_description = str(work_tasks.get("description") or "").lower()
+    work_required_phrases = (
+        "phone's onboard local work tasks board",
+        "ordinary unqualified",
+        "unnamed board-task request",
+        "mutate neither store",
+        "never use hermes kanban",
+    )
+    if not all(phrase in work_description for phrase in work_required_phrases):
+        raise RuntimeError("Work Tasks description lost its exact destination contract")
 
 
 def inspect_package(plugin_root: Path, interpreter: Path) -> None:
