@@ -1,11 +1,11 @@
 name: hermes-g2-everyday
 description: Exact source pins for the G2 transport and its MCP-owned workflows.
 author: Hermes G2 contributors
-version: 0.1.0
+version: 0.1.1
 plugins:
   - repo: not-benny/hermes-g2-bridge
-    ref: ffb3b04b3bcdb77cd400c48be91fe319cf8891f6
+    ref: 8c4f979020a21ae01fd6bc5351996e342d068136
   - repo: not-benny/hermes-g2-workflows
-    ref: 24c740c29ca2a6634d095473bb6dd55d6af17d3e
+    ref: 8ecda2d984733328e4524c070386d3c1721f5c90
 config: {}
 skills: []

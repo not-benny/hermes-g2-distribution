@@ -16,11 +16,15 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+EXPECTED_VERSION = "0.1.1"
+EXPECTED_WORKFLOW_DIGEST = (
+    "sha256:beab3a2170289a0f64ebeb957fd7a5c63fcaa43960c3ab293968c829eb6f9d4c"
+)
 EXPECTED_REFS = {
     "hermes_agent": "08f0664cdc3afe3022cc8da88f95b931651d093d",
-    "bridge": "ffb3b04b3bcdb77cd400c48be91fe319cf8891f6",
-    "workflows": "24c740c29ca2a6634d095473bb6dd55d6af17d3e",
-    "android_app": "db6098d545ba8cd20d3cc02d3db0d975afc0fdd6",
+    "bridge": "8c4f979020a21ae01fd6bc5351996e342d068136",
+    "workflows": "8ecda2d984733328e4524c070386d3c1721f5c90",
+    "android_app": "67989dada122ab6ce04594b11e57e742441dd2dd",
 }
 EXPECTED_WORKFLOW_TOOLS = frozenset(
     {
@@ -66,6 +70,10 @@ def validate_manifest() -> None:
     manifest = load_yaml(ROOT / "distribution.yaml")
     require(manifest.get("name") == "even-g2", "distribution profile name changed")
     require(
+        str(manifest.get("version")) == EXPECTED_VERSION,
+        "distribution version changed",
+    )
+    require(
         manifest.get("license") == "Apache-2.0",
         "distribution license must be Apache-2.0",
     )
@@ -96,6 +104,10 @@ def validate_locks(release: bool) -> None:
                 f"{name} is not exact-SHA pinned",
             )
             require(ref == EXPECTED_REFS[name], f"unexpected frozen commit for {name}")
+    require(
+        (lock.get("workflows") or {}).get("digest") == EXPECTED_WORKFLOW_DIGEST,
+        "workflow package digest lock changed",
+    )
 
     pack = load_yaml(ROOT / "hermes-pack.yaml")
     plugins = pack.get("plugins")
@@ -109,6 +121,10 @@ def validate_locks(release: bool) -> None:
     }
     actual_pack = {entry.get("repo"): entry.get("ref") for entry in plugins}
     require(actual_pack == expected_pack, "plugin pack and source lock differ")
+    require(
+        str(pack.get("version")) == EXPECTED_VERSION,
+        "plugin pack version changed",
+    )
     require(pack.get("config") == {}, "plugin pack must not seed authority or secrets")
 
 
@@ -307,6 +323,11 @@ def validate_workflow_surface() -> None:
         "blocked, unassigned card",
         "does not start a worker",
         "outcome-unknown",
+        "current wearer utterance",
+        "one exact destination",
+        "fresh wearer turn",
+        "unnamed board tasks use `g2_work_task_add`",
+        "mutates neither store",
     ):
         require(
             phrase.lower() in lowered_readme,
@@ -350,6 +371,21 @@ def validate_scripts() -> None:
         "bootstrap must verify the exact workflow inventory",
     )
     require(
+        'G2D_DEFAULT_SOURCE="$G2D_REPO_DIR"' in bootstrap,
+        "bootstrap must default to the reviewed local checkout",
+    )
+    require(
+        'G2D_DEFAULT_SOURCE="https://' not in bootstrap,
+        "bootstrap must not default to a mutable remote distribution source",
+    )
+    require(
+        "G2D_WORKFLOWS_DIGEST" in bootstrap
+        and "--expected-digest" in bootstrap
+        and "installed workflow package did not match its exact digest lock"
+        in bootstrap,
+        "bootstrap must enforce the exact workflow digest before granting authority",
+    )
+    require(
         "--enable-owner-tools" in bootstrap,
         "bootstrap must expose explicit owner-tool consent",
     )
@@ -380,7 +416,34 @@ def validate_scripts() -> None:
         "remove_global_toolset_blocks browser" in bootstrap,
         "personal browser consent must remove the base global block",
     )
+    require(
+        "enable_g2_toolsets_with_exact_boundary" in bootstrap
+        and "G2 tool authority exceeded the consent boundary" in bootstrap
+        and '--existing-json "$existing_json" --add "$@"' in bootstrap,
+        "G2 owner/browser consent must reject implicit toolset widening",
+    )
     require("set -x" not in lowered, "bootstrap must not enable command tracing")
+
+
+def validate_release_documentation() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    lowered = " ".join(readme.lower().split())
+    for phrase in (
+        "git clone --branch v0.1.1 --depth 1",
+        './scripts/bootstrap.sh --distribution-source "$PWD" --dry-run',
+        './scripts/bootstrap.sh --distribution-source "$PWD"',
+        "do not update an installed profile from a moving branch such as `main`",
+        "exact workflow package digest",
+        "owner-only `0600` file",
+        "gateway-safe os-keyring primitive",
+        "same os user can read that file",
+        "public [`hermes-g2-bridge`]",
+        "also apache-2.0",
+    ):
+        require(
+            phrase.lower() in lowered,
+            f"README release contract is missing: {phrase}",
+        )
 
 
 def validate_license() -> None:
@@ -410,6 +473,7 @@ def main() -> int:
         validate_public_markdown_style,
         validate_workflow_surface,
         validate_scripts,
+        validate_release_documentation,
         validate_license,
     )
     try:

@@ -25,6 +25,11 @@ EXCLUDED_FILES = frozenset({".DS_Store"})
 BINDING = "hermes-g2-workflows:workflows"
 
 
+def verify_expected_digest(digest: str, expected_digest: str | None) -> None:
+    if expected_digest is not None and digest != expected_digest:
+        raise RuntimeError("workflow package digest does not match the release lock")
+
+
 def canonical_digest(plugin_root: Path) -> str:
     root = plugin_root.resolve(strict=True)
     if not root.is_dir():
@@ -97,9 +102,11 @@ def main() -> int:
     parser.add_argument("plugin_root", type=Path)
     parser.add_argument("--existing-json", default="[]")
     parser.add_argument("--digest-only", action="store_true")
+    parser.add_argument("--expected-digest")
     args = parser.parse_args()
 
     digest = canonical_digest(args.plugin_root)
+    verify_expected_digest(digest, args.expected_digest)
     if args.digest_only:
         print(digest)
     else:

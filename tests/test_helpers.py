@@ -49,6 +49,12 @@ class PackageGrantTests(unittest.TestCase):
             (cache / "server.pyc").write_bytes(b"generated")
             self.assertEqual(first, grant.canonical_digest(root))
 
+    def test_expected_digest_rejects_changed_package(self):
+        expected = "sha256:" + "a" * 64
+        grant.verify_expected_digest(expected, expected)
+        with self.assertRaisesRegex(RuntimeError, "release lock"):
+            grant.verify_expected_digest("sha256:" + "b" * 64, expected)
+
     def test_merge_preserves_other_exact_grants_and_replaces_workflow(self):
         existing = (
             '[{"binding":"other:server","digest":"sha256:' + "a" * 64 + '"},'
@@ -104,6 +110,17 @@ class ToolsetPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "JSON list of strings"):
             toolset_policy.remove_disabled('{"browser":true}', ["browser"])
 
+    def test_add_enabled_preserves_only_existing_and_approved_names(self):
+        result = toolset_policy.add_enabled(
+            '["calendar","browser","calendar"]',
+            ["browser", "terminal", "file"],
+        )
+        self.assertEqual(result, ["calendar", "browser", "terminal", "file"])
+
+    def test_add_enabled_rejects_invalid_platform_shape(self):
+        with self.assertRaisesRegex(RuntimeError, "platform_toolsets.g2"):
+            toolset_policy.add_enabled('{"browser":true}', ["browser"])
+
 
 class WorkflowInventoryTests(unittest.TestCase):
     @staticmethod
@@ -116,13 +133,21 @@ class WorkflowInventoryTests(unittest.TestCase):
                     {
                         "description": (
                             "Create on an existing Hermes Kanban board, blocked with no assignee, "
-                            "and never starts a worker."
+                            "and never starts a worker. The current wearer request explicitly names "
+                            "the destination. After a missing board ask in a fresh turn; never choose "
+                            "a listed board yourself or substitute local Work Tasks."
                         ),
                         "inputSchema": {
                             "required": ["title", "board"],
                             "properties": {"title": {}, "board": {}, "body": {}},
                         },
                     }
+                )
+            if name == "g2_work_task_add":
+                tool["description"] = (
+                    "Add to the phone's onboard local Work Tasks board for an ordinary unqualified "
+                    "or unnamed board-task request. An incomplete Kanban request must mutate neither "
+                    "store. Never use Hermes Kanban."
                 )
             tools.append(tool)
         return [

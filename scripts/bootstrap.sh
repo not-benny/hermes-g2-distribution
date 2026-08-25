@@ -5,7 +5,7 @@ G2D_SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
 G2D_REPO_DIR="$(dirname -- "$G2D_SCRIPT_DIR")"
 G2D_LOCK_FILE="$G2D_REPO_DIR/sources.lock.json"
 G2D_PACK_FILE="$G2D_REPO_DIR/hermes-pack.yaml"
-G2D_DEFAULT_SOURCE="https://github.com/not-benny/hermes-g2-distribution.git"
+G2D_DEFAULT_SOURCE="$G2D_REPO_DIR"
 
 G2D_PROFILE="even-g2"
 G2D_DISTRIBUTION_SOURCE="${HERMES_G2_DISTRIBUTION_SOURCE:-$G2D_DEFAULT_SOURCE}"
@@ -301,6 +301,7 @@ verify_pinned_plugin() {
   local name=$1
   local repo=$2
   local ref=$3
+  local expected_digest=${4:-}
   local checkout="$G2D_TEMP_DIR/preflight-$name"
   mkdir -p -- "$checkout"
   git -C "$checkout" init -q
@@ -322,14 +323,26 @@ if allowed is not True:
     print(format_scan_report(result), file=sys.stderr)
     raise SystemExit(f"Setup stopped: locked {name} source did not pass Hermes Plugin Guard: {reason}")
 PY
+  if [[ -n "$expected_digest" ]]; then
+    local actual_digest
+    actual_digest="$(
+      python3 "$G2D_SCRIPT_DIR/package_grant.py" "$checkout" --digest-only
+    )"
+    [[ "$actual_digest" == "$expected_digest" ]] \
+      || fail "$name package digest did not match its exact lock"
+  fi
 }
 
 G2D_BRIDGE_REPO="$(lock_value bridge repo)"
 G2D_BRIDGE_REF="$(lock_value bridge ref)"
 G2D_WORKFLOWS_REPO="$(lock_value workflows repo)"
 G2D_WORKFLOWS_REF="$(lock_value workflows ref)"
+G2D_WORKFLOWS_DIGEST="$(lock_value workflows digest)"
+[[ "$G2D_WORKFLOWS_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] \
+  || fail "the workflow package digest lock is invalid"
 verify_pinned_plugin bridge "$G2D_BRIDGE_REPO" "$G2D_BRIDGE_REF"
-verify_pinned_plugin workflows "$G2D_WORKFLOWS_REPO" "$G2D_WORKFLOWS_REF"
+verify_pinned_plugin workflows "$G2D_WORKFLOWS_REPO" "$G2D_WORKFLOWS_REF" \
+  "$G2D_WORKFLOWS_DIGEST"
 
 G2D_APP_REPO="$(lock_value android_app repo)"
 G2D_APP_REF="$(lock_value android_app ref)"
@@ -406,6 +419,12 @@ hermes --profile "$G2D_PROFILE" plugins doctor hermes-g2-workflows --ci
 
 G2D_WORKFLOW_ROOT="$G2D_PROFILE_HOME/plugins/hermes-g2-workflows"
 [[ -d "$G2D_WORKFLOW_ROOT" ]] || fail "the pinned workflow package was not installed"
+G2D_INSTALLED_WORKFLOW_DIGEST="$(
+  python3 "$G2D_SCRIPT_DIR/package_grant.py" \
+    "$G2D_WORKFLOW_ROOT" --digest-only
+)"
+[[ "$G2D_INSTALLED_WORKFLOW_DIGEST" == "$G2D_WORKFLOWS_DIGEST" ]] \
+  || fail "the installed workflow package did not match its exact digest lock"
 "$G2D_HERMES_PYTHON" "$G2D_SCRIPT_DIR/workflow_inventory.py" \
   "$G2D_WORKFLOW_ROOT" --python "$G2D_HERMES_PYTHON"
 printf '\nAllow the exact installed workflow package to receive the current G2\n'
@@ -425,7 +444,8 @@ G2D_EXISTING_GRANTS="$(
 )"
 G2D_MERGED_GRANTS="$(
   python3 "$G2D_SCRIPT_DIR/package_grant.py" "$G2D_WORKFLOW_ROOT" \
-    --existing-json "$G2D_EXISTING_GRANTS"
+    --existing-json "$G2D_EXISTING_GRANTS" \
+    --expected-digest "$G2D_WORKFLOWS_DIGEST"
 )"
 hermes --profile "$G2D_PROFILE" config set \
   plugins.trusted_session_context "$G2D_MERGED_GRANTS"
@@ -465,6 +485,35 @@ remove_global_toolset_blocks() {
   hermes --profile "$G2D_PROFILE" config set agent.disabled_toolsets "$filtered_json"
 }
 
+enable_g2_toolsets_with_exact_boundary() {
+  local existing_json=$1
+  shift
+  local expected_json
+  local actual_json
+  expected_json="$(
+    python3 "$G2D_SCRIPT_DIR/toolset_policy.py" \
+      --existing-json "$existing_json" --add "$@"
+  )"
+  hermes --profile "$G2D_PROFILE" tools enable --platform g2 "$@"
+  # Hermes validates the requested names above, but plugin-platform fallback
+  # recovery can also persist unrelated toolsets. Restore the exact consent
+  # boundary: pre-existing selections plus only the newly approved names.
+  hermes --profile "$G2D_PROFILE" config set --force \
+    platform_toolsets.g2 "$expected_json"
+  actual_json="$(
+    hermes --profile "$G2D_PROFILE" config get --json platform_toolsets.g2
+  )"
+  python3 - "$actual_json" "$expected_json" <<'PY'
+import json
+import sys
+
+actual = json.loads(sys.argv[1])
+expected = json.loads(sys.argv[2])
+if actual != expected:
+    raise SystemExit("Setup stopped: G2 tool authority exceeded the consent boundary")
+PY
+}
+
 if [[ "$G2D_ENABLE_OWNER_TOOLS" == "true" ]]; then
   printf '\nOwner tools expose local files, commands, browser sessions, history,\n'
   printf 'scheduled actions, and desktop control to this private profile.\n'
@@ -472,9 +521,13 @@ if [[ "$G2D_ENABLE_OWNER_TOOLS" == "true" ]]; then
   IFS= read -r G2D_OWNER_ANSWER
   case "$G2D_OWNER_ANSWER" in
     y|Y|yes|YES|Yes)
+      G2D_EXISTING_G2_TOOLSETS="$(
+        hermes --profile "$G2D_PROFILE" config get --json platform_toolsets.g2 \
+          2>/dev/null || printf '[]'
+      )"
       remove_global_toolset_blocks "${G2D_OWNER_TOOLSETS[@]}"
-      hermes --profile "$G2D_PROFILE" tools enable \
-        --platform g2 "${G2D_OWNER_TOOLSETS[@]}"
+      enable_g2_toolsets_with_exact_boundary "$G2D_EXISTING_G2_TOOLSETS" \
+        "${G2D_OWNER_TOOLSETS[@]}"
       ;;
     *)
       fail "private owner tool access was not enabled"
@@ -486,8 +539,13 @@ elif [[ "$G2D_ENABLE_BROWSER" == "true" ]]; then
   IFS= read -r G2D_BROWSER_ANSWER
   case "$G2D_BROWSER_ANSWER" in
     y|Y|yes|YES|Yes)
+      G2D_EXISTING_G2_TOOLSETS="$(
+        hermes --profile "$G2D_PROFILE" config get --json platform_toolsets.g2 \
+          2>/dev/null || printf '[]'
+      )"
       remove_global_toolset_blocks browser
-      hermes --profile "$G2D_PROFILE" tools enable --platform g2 browser
+      enable_g2_toolsets_with_exact_boundary \
+        "$G2D_EXISTING_G2_TOOLSETS" browser
       ;;
     *)
       fail "personal browser access was not enabled"
