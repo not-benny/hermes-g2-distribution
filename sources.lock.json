@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "hermes_agent": {
+    "repo": "https://github.com/not-benny/hermes-agent.git",
+    "ref": "08f0664cdc3afe3022cc8da88f95b931651d093d",
+    "role": "minimum-capability-baseline"
+  },
+  "bridge": {
+    "repo": "https://github.com/not-benny/hermes-g2-bridge.git",
+    "ref": "ffb3b04b3bcdb77cd400c48be91fe319cf8891f6",
+    "role": "native-g2-transport"
+  },
+  "workflows": {
+    "repo": "https://github.com/not-benny/hermes-g2-workflows.git",
+    "ref": "24c740c29ca2a6634d095473bb6dd55d6af17d3e",
+    "role": "portable-workflow-mcp"
+  },
+  "android_app": {
+    "repo": "https://github.com/not-benny/hermes-g2.git",
+    "ref": "db6098d545ba8cd20d3cc02d3db0d975afc0fdd6",
+    "status": "frozen",
+    "role": "android-app-source"
+  }
+}

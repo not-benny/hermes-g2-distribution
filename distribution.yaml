@@ -1,0 +1,17 @@
+name: even-g2
+version: 0.1.0
+description: >-
+  A privacy-first Hermes profile for the Even Realities G2 app and glasses,
+  with device workflows supplied by exact, reviewable MCP packages.
+hermes_requires: ">=0.20.4"
+author: Hermes G2 contributors
+license: Apache-2.0
+env_requires:
+  - name: HERMES_G2_TOKEN
+    description: Shared secret used only between your phone and your Hermes G2 gateway.
+    required: true
+distribution_owned:
+  - SOUL.md
+  - config.yaml
+  - .env.template
+  - distribution.yaml
